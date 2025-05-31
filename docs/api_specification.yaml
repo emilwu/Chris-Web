@@ -1,0 +1,2296 @@
+openapi: 3.0.3
+info:
+  title: Hwayo 檢驗管理系統 API
+  version: v1.0.0
+  description: |
+    Hwayo 檢驗管理系統的 API 接口規格。
+    本文件為 API 規格的唯一真實來源 (SOT)。
+  contact:
+    name: Hwayo API Team
+    email: api-support@hwayo.com
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+
+servers:
+  - url: https://api.hwayo.com/api/v1
+    description: 生產環境 API 伺服器
+  - url: https://staging-api.hwayo.com/api/v1
+    description: 預生產環境 API 伺服器
+  - url: http://localhost:3000/api/v1
+    description: 本地開發 API 伺服器
+
+tags:
+  - name: Authentication
+    description: 用戶認證與授權
+  - name: DataRecords
+    description: 實驗數據記錄管理
+  - name: Workflows
+    description: 工作流程管理
+  - name: Reviews
+    description: 審核任務管理
+  - name: Reports
+    description: 檢驗報告管理
+  - name: Notifications
+    description: 通知服務
+  - name: CustomerPortal
+    description: 客戶入口相關操作
+  - name: AuditLogs
+    description: 審計日誌
+  - name: AdminUsers
+    description: 管理後台 - 用戶管理
+  - name: AdminRoles
+    description: 管理後台 - 角色權限管理
+  - name: AdminConfig
+    description: 管理後台 - 系統配置
+  - name: ExternalIntegration
+    description: 第三方系統整合
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 用於內部用戶和管理員的 JWT 認證。
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-KEY
+      description: 用於第三方系統整合的 API Key 認證。
+    customerTokenAuth:
+      type: apiKey
+      in: path
+      name: accessToken # Note: This implies the token is part of the path, e.g., /customer/reports/{accessToken}
+      description: 用於客戶存取報告的臨時令牌。
+
+  schemas:
+    # General Schemas
+    Meta:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          description: 響應時間戳
+        version:
+          type: string
+          description: API 版本
+        requestId:
+          type: string
+          description: 請求唯一 ID
+    PaginationMeta:
+      type: object
+      properties:
+        page:
+          type: integer
+          description: 當前頁碼
+        pageSize:
+          type: integer
+          description: 每頁項目數
+        totalItems:
+          type: integer
+          description: 總項目數
+        totalPages:
+          type: integer
+          description: 總頁數
+        hasNext:
+          type: boolean
+          description: 是否有下一頁
+        hasPrev:
+          type: boolean
+          description: 是否有上一頁
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          default: true
+        data:
+          type: object # Should be more specific or use oneOf/anyOf for different data types
+        meta:
+          $ref: '#/components/schemas/Meta'
+    PaginatedResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          default: true
+        data:
+          type: array
+          items:
+            type: object # Should be more specific
+        meta:
+          type: object
+          properties:
+            pagination:
+              $ref: '#/components/schemas/PaginationMeta'
+            timestamp:
+              type: string
+              format: date-time
+            version:
+              type: string
+            requestId:
+              type: string
+    ErrorDetail:
+      type: object
+      properties:
+        field:
+          type: string
+          description: 錯誤發生的欄位
+        message:
+          type: string
+          description: 錯誤訊息
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          default: false
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              description: 業務錯誤碼
+            message:
+              type: string
+              description: 錯誤摘要訊息
+            details:
+              type: array
+              items:
+                $ref: '#/components/schemas/ErrorDetail'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    # Authentication Schemas
+    LoginRequest:
+      type: object
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+          description: 用戶名稱或電子郵件
+        password:
+          type: string
+          format: password
+          description: 密碼
+        rememberMe:
+          type: boolean
+          description: 是否記住登入狀態
+          default: false
+    LoginResponseData:
+      type: object
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        expiresIn:
+          type: integer
+          format: int32
+          description: Access token 有效期 (秒)
+        user:
+          $ref: '#/components/schemas/UserContext'
+    UserContext:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid # Assuming user ID is UUID, adjust if it's integer or other string
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+        fullName:
+          type: string
+        roles:
+          type: array
+          items:
+            type: string
+        permissions:
+          type: array
+          items:
+            type: string
+    RefreshTokenRequest:
+      type: object
+      required:
+        - refreshToken
+      properties:
+        refreshToken:
+          type: string
+    VerifyPermissionRequest:
+      type: object
+      required:
+        - userId
+        - resource
+        - action
+      properties:
+        userId:
+          type: string
+        resource:
+          type: string
+          description: 如 'data_records', 'review_tasks', 'reports'
+        action:
+          type: string
+          description: 如 'create', 'read', 'update', 'delete', 'approve'
+        context:
+          type: object
+          properties:
+            recordId:
+              type: string
+            departmentId:
+              type: string
+          additionalProperties: true
+    VerifyPermissionResponseData:
+      type: object
+      properties:
+        hasPermission:
+          type: boolean
+        permissions:
+          type: array
+          items:
+            type: string
+        restrictions:
+          type: object
+          properties:
+            timeRestriction:
+              type: string
+            ipRestriction:
+              type: array
+              items:
+                type: string
+          additionalProperties: true
+
+    # DataRecords Schemas (Simplified, refer to master_data_model.md for full details)
+    AttachmentInput:
+      type: object
+      properties:
+        filename:
+          type: string
+        fileData:
+          type: string
+          format: byte # Base64 encoded string
+          description: Base64 編碼的檔案內容
+        mimeType:
+          type: string
+    CreateDataRecordRequest:
+      type: object
+      required:
+        - testCaseId
+        - formTemplateId
+        - formData
+      properties:
+        testCaseId:
+          type: string
+        formTemplateId:
+          type: string
+        formData:
+          type: object
+          description: 動態表單數據，結構由 formTemplate 定義
+          additionalProperties: true
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/AttachmentInput'
+    DataRecord: # Simplified representation
+      type: object
+      properties:
+        id:
+          type: string
+        testCaseId:
+          type: string
+        formTemplateId:
+          type: string
+        formData:
+          type: object
+          additionalProperties: true
+        status:
+          type: string
+        # ... other fields from master_data_model.md
+    UpdateDataRecordStatusRequest:
+      type: object
+      required:
+        - status
+        - workflowInstanceId
+        - updatedBy
+      properties:
+        status:
+          type: string
+          enum: [draft, submitted, under_review, approved, rejected]
+        workflowInstanceId:
+          type: string
+        updatedBy:
+          type: string
+        comment:
+          type: string
+
+    # Workflow Schemas
+    WorkflowVariables:
+      type: object
+      properties:
+        submitterId:
+          type: string
+        sampleType:
+          type: string
+        urgencyLevel:
+          type: string
+          enum: [normal, urgent, critical]
+        specialInstructions:
+          type: string
+    StartWorkflowRequest:
+      type: object
+      required:
+        - definitionId
+        - entityId
+        - entityType
+      properties:
+        definitionId:
+          type: string
+        entityId:
+          type: string
+        entityType:
+          type: string
+          enum: [data_record, test_case] # Example entity types
+        variables:
+          $ref: '#/components/schemas/WorkflowVariables'
+    WorkflowTaskCommentInput:
+      type: object
+      properties:
+        type:
+          type: string
+        content:
+          type: string
+        fieldPath:
+          type: string
+        severity:
+          type: string
+    CompleteWorkflowTaskRequest:
+      type: object
+      required:
+        - result
+      properties:
+        result:
+          type: string
+          enum: [approved, rejected, requires_modification]
+        comments:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkflowTaskCommentInput'
+        nextAction:
+          type: string
+        metadata:
+          type: object
+          properties:
+            reviewDuration:
+              type: number
+              format: float
+            issuesFound:
+              type: integer
+            criticalIssues:
+              type: integer
+    ReportCompletedEventRequest:
+      type: object
+      required:
+        - workflowInstanceId
+        - reportId
+        - status
+      properties:
+        workflowInstanceId:
+          type: string
+        reportId:
+          type: string
+        reportUrl:
+          type: string
+          format: url
+        fileSize:
+          type: integer
+          format: int64
+        generationTime:
+          type: number
+          format: float
+          description: 生成耗時(秒)
+        status:
+          type: string
+          enum: [completed, failed]
+        errorMessage:
+          type: string
+
+    # Review Schemas
+    CreateReviewTaskRequest:
+      type: object
+      required:
+        - dataRecordId
+        - workflowInstanceId
+        - reviewType
+        - priority
+      properties:
+        dataRecordId:
+          type: string
+        workflowInstanceId:
+          type: string
+        reviewType:
+          type: string
+          enum: [data_review, report_review, final_approval] # Example types
+        assignedTo:
+          type: string
+        dueDate:
+          type: string
+          format: date-time
+        priority:
+          type: string
+          enum: [low, medium, high, critical]
+        metadata:
+          type: object
+          properties:
+            sampleType:
+              type: string
+            submitterName:
+              type: string
+            submissionDate:
+              type: string
+              format: date-time
+    DigitalSignatureInput:
+      type: object
+      properties:
+        signatureData:
+          type: string
+          description: Base64 encoded signature or cryptographic hash
+        certificateInfo:
+          type: string
+          description: Information about the signing certificate
+    SubmitReviewResultRequest:
+      type: object
+      required:
+        - result
+      properties:
+        result:
+          type: string
+          enum: [approved, rejected, requires_modification]
+        comments:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkflowTaskCommentInput' # Reusing comment schema
+        digitalSignature:
+          $ref: '#/components/schemas/DigitalSignatureInput'
+
+    # Report Schemas
+    GenerateReportRequest:
+      type: object
+      required:
+        - dataRecordId
+        - templateId
+      properties:
+        dataRecordId:
+          type: string
+        templateId:
+          type: string
+        workflowInstanceId:
+          type: string
+        generationOptions:
+          type: object
+          properties:
+            format:
+              type: string
+              enum: [pdf, docx, xlsx]
+            includeRawData:
+              type: boolean
+            includeCharts:
+              type: boolean
+            watermark:
+              type: string
+        metadata:
+          type: object
+          properties:
+            approvedBy:
+              type: string
+            approvalDate:
+              type: string
+              format: date-time
+            reportType:
+              type: string
+              enum: [standard, detailed, summary]
+
+    # Notification Schemas
+    SendNotificationRequest:
+      type: object
+      required:
+        - type
+        - recipientId
+        - templateId
+        - templateData
+      properties:
+        type:
+          type: string
+          description: Notification type, e.g., 'task_assigned', 'report_ready'
+        recipientId:
+          type: string
+        templateId:
+          type: string
+        templateData:
+          type: object
+          properties:
+            workflowInstanceId:
+              type: string
+            taskId:
+              type: string
+            reportId:
+              type: string
+            sampleName:
+              type: string
+            dueDate:
+              type: string
+              format: date-time
+            actionUrl:
+              type: string
+              format: url
+          additionalProperties: true
+        priority:
+          type: string
+          enum: [low, medium, high]
+        scheduledAt:
+          type: string
+          format: date-time
+
+    # Customer Portal Schemas
+    PublishReportToCustomerPortalRequest:
+      type: object
+      required:
+        - reportId
+        - customerId
+        - reportMetadata
+        - accessSettings
+      properties:
+        reportId:
+          type: string
+        customerId:
+          type: string
+        reportMetadata:
+          type: object
+          properties:
+            title:
+              type: string
+            reportNumber:
+              type: string
+            sampleName:
+              type: string
+            testDate:
+              type: string
+              format: date
+            expirationDate:
+              type: string
+              format: date
+        accessSettings:
+          type: object
+          properties:
+            maxDownloads:
+              type: integer
+            accessDuration:
+              type: integer
+              description: 存取有效期(小時)
+            requiresPassword:
+              type: boolean
+
+    # Audit Log Schemas
+    LogAuditEventRequest:
+      type: object
+      required:
+        - eventType
+        - category
+        - resource
+        - action
+        - result
+        - severity
+      properties:
+        eventType:
+          type: string
+          enum: [user_action, system_event, data_change, security_event]
+        category:
+          type: string
+          enum: [authentication, data_access, data_modification, workflow_operation, system_config]
+        userId:
+          type: string
+        sessionId:
+          type: string
+        resource:
+          type: string
+          description: 操作的資源, e.g., 'User', 'DataRecord:123'
+        action:
+          type: string
+          description: 執行的動作, e.g., 'create', 'login', 'approve_review'
+        details:
+          type: object
+          properties:
+            entityType:
+              type: string
+            entityId:
+              type: string
+            oldValues:
+              type: object
+              additionalProperties: true
+            newValues:
+              type: object
+              additionalProperties: true
+            workflowInstanceId:
+              type: string
+          additionalProperties: true
+        result:
+          type: string
+          enum: [success, failure, partial_success]
+        severity:
+          type: string
+          enum: [info, warning, error, critical]
+
+    # Admin Schemas (Simplified)
+    AdminUser: # Simplified representation of a user for admin purposes
+      type: object
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        email:
+          type: string
+        fullName:
+          type: string
+        isActive:
+          type: boolean
+        roles:
+          type: array
+          items:
+            type: string
+        # ... other fields
+    CreateAdminUserRequest:
+      type: object
+      required: [username, email, fullName, password]
+      properties:
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+        fullName:
+          type: string
+        password:
+          type: string
+          format: password
+        roles:
+          type: array
+          items:
+            type: string
+    UpdateAdminUserRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        fullName:
+          type: string
+        isActive:
+          type: boolean
+        roles:
+          type: array
+          items:
+            type: string
+    ResetPasswordRequest:
+      type: object
+      required: [newPassword]
+      properties:
+        newPassword:
+          type: string
+          format: password
+    AdminRole:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        permissions:
+          type: array
+          items:
+            type: string
+    CreateAdminRoleRequest:
+      type: object
+      required: [name, permissions]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        permissions:
+          type: array
+          items:
+            type: string
+    UpdateAdminRoleRequest:
+      type: object
+      properties:
+        description:
+          type: string
+        permissions:
+          type: array
+          items:
+            type: string
+    AssignUserRolesRequest:
+      type: object
+      required: [roleIds]
+      properties:
+        roleIds:
+          type: array
+          items:
+            type: string
+    SystemConfig:
+      type: object
+      description: 系統配置項 (範例)
+      properties:
+        maxLoginAttempts:
+          type: integer
+        sessionTimeoutSeconds:
+          type: integer
+        # ... other config items
+    SystemStatus:
+      type: object
+      properties:
+        serviceName:
+          type: string
+        status:
+          type: string
+          enum: [UP, DOWN, DEGRADED]
+        version:
+          type: string
+        uptime:
+          type: string
+
+    # External Integration Schemas
+    WebhookPayload: # Example, structure depends on the source
+      type: object
+      description: 接收外部系統通知的通用 Webhook 負載結構
+      properties:
+        eventType:
+          type: string
+        payload:
+          type: object
+          additionalProperties: true
+        timestamp:
+          type: string
+          format: date-time
+    SyncTestDataRequest: # Example
+      type: object
+      description: 同步檢驗數據的請求結構
+      properties:
+        sourceSystemId:
+          type: string
+        dataSetId:
+          type: string
+        data:
+          type: array
+          items:
+            type: object # Specific data structure for test data
+            additionalProperties: true
+    ExternalReportStatus:
+      type: object
+      properties:
+        reportId:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, PROCESSING, COMPLETED, FAILED]
+        details:
+          type: string
+
+  responses:
+    UnauthorizedError:
+      description: 未認證或認證失敗
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            error:
+              code: "AUTH_INVALID_CREDENTIALS"
+              message: "認證憑證無效"
+            meta:
+              timestamp: "2025-05-31T01:49:00Z"
+              version: "v1"
+              requestId: "req_error_auth"
+    ForbiddenError:
+      description: 無權限存取
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            error:
+              code: "AUTH_INSUFFICIENT_PERMISSIONS"
+              message: "權限不足"
+            meta:
+              timestamp: "2025-05-31T01:49:00Z"
+              version: "v1"
+              requestId: "req_error_forbidden"
+    NotFoundError:
+      description: 資源不存在
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            error:
+              code: "RESOURCE_NOT_FOUND"
+              message: "請求的資源不存在"
+            meta:
+              timestamp: "2025-05-31T01:49:00Z"
+              version: "v1"
+              requestId: "req_error_notfound"
+    ValidationError:
+      description: 請求參數驗證失敗
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            error:
+              code: "VALIDATION_ERROR"
+              message: "請求參數驗證失敗"
+              details:
+                - field: "email"
+                  message: "電子郵件格式不正確"
+            meta:
+              timestamp: "2025-05-31T01:49:00Z"
+              version: "v1"
+              requestId: "req_error_validation"
+    InternalServerError:
+      description: 伺服器內部錯誤
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            error:
+              code: "SYSTEM_INTERNAL_ERROR"
+              message: "伺服器發生未預期的錯誤"
+            meta:
+              timestamp: "2025-05-31T01:49:00Z"
+              version: "v1"
+              requestId: "req_error_internal"
+    TooManyRequestsError:
+      description: 請求頻率超限
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            error:
+              code: "RATE_LIMIT_EXCEEDED"
+              message: "請求頻率過高，請稍後再試"
+            meta:
+              timestamp: "2025-05-31T01:49:00Z"
+              version: "v1"
+              requestId: "req_error_ratelimit"
+              
+  parameters:
+    RecordIdPathParameter:
+      name: recordId
+      in: path
+      required: true
+      description: 數據記錄的唯一標識符
+      schema:
+        type: string # Assuming UUID or similar string ID
+    TaskIdPathParameter:
+      name: taskId
+      in: path
+      required: true
+      description: 任務的唯一標識符
+      schema:
+        type: string
+    ReportIdPathParameter:
+      name: reportId
+      in: path
+      required: true
+      description: 報告的唯一標識符
+      schema:
+        type: string
+    NotificationIdPathParameter:
+      name: notificationId
+      in: path
+      required: true
+      description: 通知的唯一標識符
+      schema:
+        type: string
+    CustomerAccessTokenPathParameter:
+      name: accessToken
+      in: path
+      required: true
+      description: 客戶存取報告的令牌
+      schema:
+        type: string
+    UserIdPathParameter:
+      name: userId
+      in: path
+      required: true
+      description: 用戶的唯一標識符
+      schema:
+        type: string
+    RoleIdPathParameter:
+      name: roleId
+      in: path
+      required: true
+      description: 角色的唯一標識符
+      schema:
+        type: string
+    WebhookSourcePathParameter:
+      name: source
+      in: path
+      required: true
+      description: Webhook 來源系統標識符
+      schema:
+        type: string
+        
+    PageQueryParameter:
+      name: page
+      in: query
+      description: 請求的頁碼 (從 1 開始)
+      schema:
+        type: integer
+        default: 1
+        minimum: 1
+    PageSizeQueryParameter:
+      name: pageSize
+      in: query
+      description: 每頁的項目數量
+      schema:
+        type: integer
+        default: 20
+        minimum: 1
+        maximum: 100
+    StatusQueryParameter:
+      name: status
+      in: query
+      description: 按狀態篩選
+      schema:
+        type: string
+    PriorityQueryParameter:
+      name: priority
+      in: query
+      description: 按優先級篩選
+      schema:
+        type: string
+    TypeQueryParameter:
+      name: type
+      in: query
+      description: 按類型篩選
+      schema:
+        type: string
+    DateFromQueryParameter:
+      name: dateFrom
+      in: query
+      description: 起始日期 (YYYY-MM-DD)
+      schema:
+        type: string
+        format: date
+    DateToQueryParameter:
+      name: dateTo
+      in: query
+      description: 結束日期 (YYYY-MM-DD)
+      schema:
+        type: string
+        format: date
+    TestCaseIdQueryParameter:
+      name: testCaseId
+      in: query
+      description: 按檢驗案例 ID 篩選
+      schema:
+        type: string
+    EventTypeQueryParameter:
+      name: eventType
+      in: query
+      description: 按事件類型篩選 (用於審計日誌)
+      schema:
+        type: string
+    ResourceQueryParameter:
+      name: resource
+      in: query
+      description: 按資源篩選 (用於審計日誌)
+      schema:
+        type: string
+
+paths:
+  /auth/login:
+    post:
+      tags:
+        - Authentication
+      summary: 用戶登入
+      description: 使用用戶名稱/電子郵件和密碼進行認證，成功後返回 JWT。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: 登入成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    default: true
+                  data:
+                    $ref: '#/components/schemas/LoginResponseData'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /auth/refresh:
+    post:
+      tags:
+        - Authentication
+      summary: 刷新 Access Token
+      description: 使用有效的 Refresh Token 獲取新的 Access Token。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '200':
+          description: 刷新成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    default: true
+                  data: # Simplified, should be similar to LoginResponseData but without user info or new refresh token
+                    type: object
+                    properties:
+                      accessToken:
+                        type: string
+                      expiresIn:
+                        type: integer
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError' # If refresh token is invalid or expired
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /auth/logout:
+    post:
+      tags:
+        - Authentication
+      summary: 用戶登出
+      description: 使當前的 Access Token 和 Refresh Token 失效。
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: 登出成功，無返回內容
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /internal/auth/verify-permission:
+    post:
+      tags:
+        - Authentication # Internal API, but related to auth
+      summary: 權限驗證 (內部 API)
+      description: 驗證指定用戶對特定資源和操作是否擁有權限。
+      security:
+        - bearerAuth: [] # Assuming internal services also use JWT
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyPermissionRequest'
+      responses:
+        '200':
+          description: 權限驗證結果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    default: true
+                  data:
+                    $ref: '#/components/schemas/VerifyPermissionResponseData'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /data/records:
+    post:
+      tags:
+        - DataRecords
+      summary: 建立數據記錄
+      description: 提交新的實驗數據記錄，包含表單數據和附件。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json: # Or multipart/form-data if files are large
+            schema:
+              $ref: '#/components/schemas/CreateDataRecordRequest'
+      responses:
+        '201':
+          description: 數據記錄建立成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    default: true
+                  data:
+                    $ref: '#/components/schemas/DataRecord' # Full DataRecord object
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /data/records/{recordId}:
+    get:
+      tags:
+        - DataRecords
+      summary: 獲取數據記錄詳情
+      description: 根據 ID 獲取指定的數據記錄。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RecordIdPathParameter'
+      responses:
+        '200':
+          description: 成功獲取數據記錄
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    default: true
+                  data:
+                    $ref: '#/components/schemas/DataRecord'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    put:
+      tags:
+        - DataRecords
+      summary: 更新數據記錄
+      description: 更新指定的數據記錄內容。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RecordIdPathParameter'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDataRecordRequest' # Can reuse or create a specific UpdateDataRecordRequest
+      responses:
+        '200':
+          description: 數據記錄更新成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    default: true
+                  data:
+                    $ref: '#/components/schemas/DataRecord'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /internal/data/records/{recordId}/status:
+    put:
+      tags:
+        - DataRecords # Internal API
+      summary: 更新記錄狀態 (內部 API)
+      description: 由流程引擎等內部服務調用，更新數據記錄的狀態。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RecordIdPathParameter'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDataRecordStatusRequest'
+      responses:
+        '200':
+          description: 狀態更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse' # Generic success or updated DataRecord
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /workflow/instances:
+    post:
+      tags:
+        - Workflows
+      summary: 啟動工作流程實例
+      description: 根據流程定義 ID 和相關實體信息啟動一個新的工作流程實例。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartWorkflowRequest'
+      responses:
+        '201':
+          description: 工作流程實例啟動成功
+          content:
+            application/json:
+              schema:
+                # Define response schema for workflow instance creation
+                $ref: '#/components/schemas/SuccessResponse' # Example, should be more specific
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /workflow/tasks/{taskId}/complete:
+    post:
+      tags:
+        - Workflows
+      summary: 完成工作流程任務
+      description: 提交工作流程任務的結果，例如審核意見。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TaskIdPathParameter'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteWorkflowTaskRequest'
+      responses:
+        '200':
+          description: 任務完成提交成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse' # Example
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError' # If task ID is invalid
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /workflow/tasks/my-tasks:
+    get:
+      tags:
+        - Workflows
+      summary: 獲取用戶任務列表
+      description: 獲取當前認證用戶的待辦任務列表。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/StatusQueryParameter'
+        - $ref: '#/components/parameters/PriorityQueryParameter'
+        - $ref: '#/components/parameters/PageQueryParameter'
+        - $ref: '#/components/parameters/PageSizeQueryParameter'
+      responses:
+        '200':
+          description: 成功獲取任務列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedResponse' # With items being WorkflowTask schema
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /internal/workflow/events/report-completed:
+    post:
+      tags:
+        - Workflows # Internal API
+      summary: 報告完成事件 (內部 API)
+      description: 由報告產生器調用，通知流程引擎報告已生成完成。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportCompletedEventRequest'
+      responses:
+        '202': # Accepted for async processing
+          description: 事件接收成功
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /internal/review/tasks:
+    post:
+      tags:
+        - Reviews # Internal API
+      summary: 建立審核任務 (內部 API)
+      description: 由流程引擎調用，為審核系統建立新的審核任務。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateReviewTaskRequest'
+      responses:
+        '201':
+          description: 審核任務建立成功
+          content:
+            application/json:
+              schema:
+                # Define response for review task creation
+                $ref: '#/components/schemas/SuccessResponse' # Example
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /review/tasks/{taskId}:
+    get:
+      tags:
+        - Reviews
+      summary: 獲取審核任務詳情
+      description: 根據 ID 獲取指定的審核任務詳情。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TaskIdPathParameter'
+      responses:
+        '200':
+          description: 成功獲取審核任務
+          content:
+            application/json:
+              schema:
+                # Define ReviewTask schema
+                $ref: '#/components/schemas/SuccessResponse' # Example
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /review/tasks/{taskId}/submit:
+    post:
+      tags:
+        - Reviews
+      summary: 提交審核結果
+      description: 提交指定審核任務的結果，包含評論和數位簽章。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TaskIdPathParameter'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitReviewResultRequest'
+      responses:
+        '200':
+          description: 審核結果提交成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse' # Example
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /review/tasks/{taskId}/comments:
+    post:
+      tags:
+        - Reviews
+      summary: 添加審核評論
+      description: 為指定的審核任務添加評論。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TaskIdPathParameter'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkflowTaskCommentInput' # Reusing comment schema
+      responses:
+        '201':
+          description: 評論添加成功
+          content:
+            application/json:
+              schema:
+                # Define response for comment creation
+                $ref: '#/components/schemas/SuccessResponse' # Example
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /internal/reports/generate:
+    post:
+      tags:
+        - Reports # Internal API
+      summary: 觸發報告生成 (內部 API)
+      description: 由流程引擎調用，觸發報告產生器生成檢驗報告。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateReportRequest'
+      responses:
+        '202': # Accepted for async generation
+          description: 報告生成請求已接受
+          content:
+            application/json:
+              schema:
+                # Define response for report generation request
+                $ref: '#/components/schemas/SuccessResponse' # Example
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /reports/{reportId}/status:
+    get:
+      tags:
+        - Reports
+      summary: 獲取報告狀態
+      description: 查詢指定報告的生成狀態。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ReportIdPathParameter'
+      responses:
+        '200':
+          description: 成功獲取報告狀態
+          content:
+            application/json:
+              schema:
+                # Define ReportStatus schema
+                $ref: '#/components/schemas/SuccessResponse' # Example
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /reports/{reportId}/download:
+    get:
+      tags:
+        - Reports
+      summary: 下載報告
+      description: 下載指定的檢驗報告檔案。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ReportIdPathParameter'
+      responses:
+        '200':
+          description: 報告檔案
+          content:
+            application/pdf: # Example, could be other formats
+              schema:
+                type: string
+                format: binary
+            application/vnd.openxmlformats-officedocument.wordprocessingml.document:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /reports:
+    get:
+      tags:
+        - Reports
+      summary: 獲取報告列表
+      description: 根據篩選條件獲取檢驗報告列表。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/StatusQueryParameter'
+        - $ref: '#/components/parameters/TestCaseIdQueryParameter'
+        - $ref: '#/components/parameters/DateFromQueryParameter'
+        - $ref: '#/components/parameters/DateToQueryParameter'
+        - $ref: '#/components/parameters/PageQueryParameter'
+        - $ref: '#/components/parameters/PageSizeQueryParameter'
+      responses:
+        '200':
+          description: 成功獲取報告列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedResponse' # With items being Report schema
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /internal/notifications:
+    post:
+      tags:
+        - Notifications # Internal API
+      summary: 發送通知 (內部 API)
+      description: 由各模組調用，通過通知模組發送業務通知。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendNotificationRequest'
+      responses:
+        '202': # Accepted for async sending
+          description: 通知請求已接受
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /notifications/my-notifications:
+    get:
+      tags:
+        - Notifications
+      summary: 獲取用戶通知
+      description: 獲取當前認證用戶的通知列表。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/StatusQueryParameter' # e.g., unread, read, all
+        - $ref: '#/components/parameters/TypeQueryParameter'
+        - $ref: '#/components/parameters/PageQueryParameter'
+        - $ref: '#/components/parameters/PageSizeQueryParameter'
+      responses:
+        '200':
+          description: 成功獲取通知列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedResponse' # With items being Notification schema
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /notifications/{notificationId}/read:
+    put:
+      tags:
+        - Notifications
+      summary: 標記通知為已讀
+      description: 將指定的通知標記為已讀狀態。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/NotificationIdPathParameter'
+      responses:
+        '204':
+          description: 標記成功，無返回內容
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError' # If user tries to mark other's notification
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /internal/customer-portal/reports/publish:
+    post:
+      tags:
+        - CustomerPortal # Internal API
+      summary: 發布報告到客戶入口 (內部 API)
+      description: 由報告產生器或流程引擎調用，將完成的報告發布到客戶入口。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublishReportToCustomerPortalRequest'
+      responses:
+        '200':
+          description: 報告發布成功
+          content:
+            application/json:
+              schema:
+                # Define response for publishing report, e.g., access token and URL
+                $ref: '#/components/schemas/SuccessResponse' # Example
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /customer/reports/{accessToken}:
+    get:
+      tags:
+        - CustomerPortal
+      summary: 客戶存取報告詳情
+      description: 客戶使用存取令牌查看報告的元數據和摘要。
+      security:
+        - customerTokenAuth: [] # Uses the accessToken in path
+      parameters:
+        - $ref: '#/components/parameters/CustomerAccessTokenPathParameter'
+      responses:
+        '200':
+          description: 成功獲取報告詳情
+          content:
+            application/json:
+              schema:
+                # Define schema for customer report details
+                $ref: '#/components/schemas/SuccessResponse' # Example
+        '401':
+          $ref: '#/components/responses/UnauthorizedError' # If token is invalid/expired
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /customer/reports/{accessToken}/download:
+    get:
+      tags:
+        - CustomerPortal
+      summary: 客戶下載報告
+      description: 客戶使用存取令牌下載完整的報告檔案。
+      security:
+        - customerTokenAuth: []
+      parameters:
+        - $ref: '#/components/parameters/CustomerAccessTokenPathParameter'
+      responses:
+        '200':
+          description: 報告檔案
+          content:
+            application/pdf: # Example
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError' # e.g., max downloads reached
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /customer/reports: # Assuming this is for a logged-in customer if they have an account
+    get:
+      tags:
+        - CustomerPortal
+      summary: 獲取客戶報告列表 (需客戶認證)
+      description: 獲取已登入客戶可存取的報告列表。
+      security:
+        - bearerAuth: [] # Or a specific customer session auth
+      parameters:
+        - $ref: '#/components/parameters/StatusQueryParameter'
+        - $ref: '#/components/parameters/DateFromQueryParameter'
+        - $ref: '#/components/parameters/DateToQueryParameter'
+        - $ref: '#/components/parameters/PageQueryParameter'
+        - $ref: '#/components/parameters/PageSizeQueryParameter'
+      responses:
+        '200':
+          description: 成功獲取客戶報告列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedResponse' # With items being CustomerReportListItem schema
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /internal/audit/log:
+    post:
+      tags:
+        - AuditLogs # Internal API
+      summary: 記錄審計事件 (內部 API)
+      description: 由各模組調用，向審計日誌模組記錄操作事件。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LogAuditEventRequest'
+      responses:
+        '202': # Accepted for async logging
+          description: 審計事件記錄請求已接受
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /admin/audit/logs:
+    get:
+      tags:
+        - AuditLogs # Admin access
+      summary: 查詢審計日誌
+      description: 管理員查詢系統審計日誌。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/EventTypeQueryParameter'
+        - $ref: '#/components/parameters/UserIdPathParameter' # Should be Query parameter for filtering
+        - $ref: '#/components/parameters/ResourceQueryParameter'
+        - $ref: '#/components/parameters/DateFromQueryParameter'
+        - $ref: '#/components/parameters/DateToQueryParameter'
+        - $ref: '#/components/parameters/PageQueryParameter'
+        - $ref: '#/components/parameters/PageSizeQueryParameter'
+      responses:
+        '200':
+          description: 成功獲取審計日誌列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedResponse' # With items being AuditLogEntry schema
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /internal/audit/security-events:
+    post:
+      tags:
+        - AuditLogs # Internal API for security specific events
+      summary: 記錄安全事件 (內部 API)
+      description: 記錄系統中發生的安全相關事件。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LogAuditEventRequest' # Can reuse or create a specific SecurityEventRequest
+      responses:
+        '202':
+          description: 安全事件記錄請求已接受
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # Admin User Management
+  /admin/users:
+    get:
+      tags:
+        - AdminUsers
+      summary: 獲取用戶列表 (管理後台)
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/PageQueryParameter'
+        - $ref: '#/components/parameters/PageSizeQueryParameter'
+        # Add other filters like username, email, isActive
+      responses:
+        '200':
+          description: 成功獲取用戶列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedResponse' # Items: AdminUser
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+    post:
+      tags:
+        - AdminUsers
+      summary: 建立用戶 (管理後台)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAdminUserRequest'
+      responses:
+        '201':
+          description: 用戶建立成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUser' # Full AdminUser object
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '409': # Conflict if username/email already exists
+          description: 用戶名或郵箱已存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /admin/users/{userId}:
+    put:
+      tags:
+        - AdminUsers
+      summary: 更新用戶 (管理後台)
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/UserIdPathParameter'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAdminUserRequest'
+      responses:
+        '200':
+          description: 用戶更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUser'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+    delete:
+      tags:
+        - AdminUsers
+      summary: 停用用戶 (管理後台)
+      description: 邏輯刪除或停用用戶帳號。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/UserIdPathParameter'
+      responses:
+        '204':
+          description: 用戶停用成功
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /admin/users/{userId}/reset-password:
+    post:
+      tags:
+        - AdminUsers
+      summary: 重設用戶密碼 (管理後台)
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/UserIdPathParameter'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResetPasswordRequest'
+      responses:
+        '204':
+          description: 密碼重設成功
+        '400':
+          $ref: '#/components/responses/ValidationError' # e.g. password policy not met
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  # Admin Role Management
+  /admin/roles:
+    get:
+      tags:
+        - AdminRoles
+      summary: 獲取角色列表 (管理後台)
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 成功獲取角色列表
+          content:
+            application/json:
+              schema:
+                type: object # PaginatedResponse or simple array
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AdminRole'
+                  meta:
+                    $ref: '#/components/schemas/Meta' # Or PaginationMeta
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+    post:
+      tags:
+        - AdminRoles
+      summary: 建立角色 (管理後台)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAdminRoleRequest'
+      responses:
+        '201':
+          description: 角色建立成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminRole'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '409': # Conflict if role name already exists
+          description: 角色名稱已存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /admin/roles/{roleId}:
+    put:
+      tags:
+        - AdminRoles
+      summary: 更新角色權限 (管理後台)
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RoleIdPathParameter'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAdminRoleRequest'
+      responses:
+        '200':
+          description: 角色更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminRole'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /admin/users/{userId}/roles:
+    post: # Assign roles to a user
+      tags:
+        - AdminRoles # Or AdminUsers
+      summary: 分配用戶角色 (管理後台)
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/UserIdPathParameter'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignUserRolesRequest'
+      responses:
+        '200':
+          description: 用戶角色分配成功
+          content:
+            application/json:
+              schema: # Could return the updated user with new roles
+                $ref: '#/components/schemas/AdminUser'
+        '400':
+          $ref: '#/components/responses/ValidationError' # e.g., invalid roleId
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError' # If user or role not found
+
+  # Admin System Configuration
+  /admin/config:
+    get:
+      tags:
+        - AdminConfig
+      summary: 獲取系統配置 (管理後台)
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 成功獲取系統配置
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemConfig'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+    put:
+      tags:
+        - AdminConfig
+      summary: 更新系統配置 (管理後台)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SystemConfig'
+      responses:
+        '200':
+          description: 系統配置更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemConfig'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /admin/system/status:
+    get:
+      tags:
+        - AdminConfig
+      summary: 獲取系統狀態 (管理後台)
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 成功獲取系統狀態
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SystemStatus'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  # External Integration
+  /external/webhooks/{source}:
+    post:
+      tags:
+        - ExternalIntegration
+      summary: 接收外部系統通知 (Webhook)
+      description: 用於接收來自指定第三方系統的 Webhook 通知。
+      security:
+        - apiKeyAuth: [] # Or other specific auth for webhooks
+      parameters:
+        - $ref: '#/components/parameters/WebhookSourcePathParameter'
+      requestBody:
+        required: true
+        content:
+          application/json: # Or other content types depending on the source
+            schema:
+              $ref: '#/components/schemas/WebhookPayload'
+      responses:
+        '202':
+          description: Webhook 接收成功並已排隊處理
+        '400':
+          description: 請求體無效或來源不支持
+        '401':
+          description: API Key 無效或缺失
+        '403':
+          description: 來源系統無權限發送 Webhook
+
+  /external/sync/test-data:
+    post:
+      tags:
+        - ExternalIntegration
+      summary: 同步檢驗數據 (第三方整合)
+      description: 允許授權的第三方系統同步檢驗數據到 Hwayo 系統。
+      security:
+        - apiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SyncTestDataRequest'
+      responses:
+        '202':
+          description: 數據同步請求已接受
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError' # Invalid API Key
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /external/reports/{reportId}/status:
+    get:
+      tags:
+        - ExternalIntegration
+      summary: 獲取報告狀態 (第三方整合)
+      description: 允許授權的第三方系統查詢指定報告的狀態。
+      security:
+        - apiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ReportIdPathParameter'
+      responses:
+        '200':
+          description: 成功獲取報告狀態
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalReportStatus'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
